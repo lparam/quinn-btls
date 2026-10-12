@@ -20,15 +20,38 @@ use std::sync::Arc;
 use std::sync::LazyLock;
 use tracing::{trace, warn};
 
+/// Hook callback invoked during SSL session initialization.
+pub type SslInitHook = Box<dyn Fn(&mut Ssl) + Send + Sync>;
+
+/// Hook callback invoked to inspect or mutate raw QUIC transport parameters.
+pub type TransportParamsHook = Box<dyn Fn(&mut Vec<u8>) + Send + Sync>;
+
 /// Configuration for a client-side QUIC. Wraps around a BoringSSL [SslContext].
 pub struct Config {
     ctx: SslContext,
     session_cache: Arc<dyn SessionCache>,
-    pub ssl_init_hook: Option<Box<dyn Fn(&mut Ssl) + Send + Sync>>,
-    pub transport_params_hook: Option<Box<dyn Fn(&mut Vec<u8>) + Send + Sync>>,
+    pub ssl_init_hook: Option<SslInitHook>,
+    pub transport_params_hook: Option<TransportParamsHook>,
 }
 
 impl Config {
+    /// Registers an initialization hook executed on each new SSL connection.
+    pub fn with_ssl_init_hook<F>(mut self, hook: F) -> Self
+    where
+        F: Fn(&mut Ssl) + Send + Sync + 'static,
+    {
+        self.ssl_init_hook = Some(Box::new(hook));
+        self
+    }
+
+    /// Registers a transport parameters hook executed prior to emitting parameters.
+    pub fn with_transport_params_hook<F>(mut self, hook: F) -> Self
+    where
+        F: Fn(&mut Vec<u8>) + Send + Sync + 'static,
+    {
+        self.transport_params_hook = Some(Box::new(hook));
+        self
+    }
     pub fn new() -> Result<Self> {
         let mut builder = SslContextBuilder::new(SslMethod::tls())?;
         // QUIC requires TLS 1.3.
